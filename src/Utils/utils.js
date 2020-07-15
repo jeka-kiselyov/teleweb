@@ -3,8 +3,8 @@ import { BigInteger, SecureRandom } from './bigNumbers'
 import { str2bigInt, bigInt2str, getBpe, getOne, copyInt_, copy_, add_, rightShift_, sub_, eGCD_, divide_, equalsInt, greater, isZero, powMod } from './leemonBigInt'
 import CryptoJS from 'crypto-js'
 import * as IGE from './aesIGEMode'
-import { LogService, ErrorResponse } from '../Services'
-import zlib from 'zlib'
+import { ErrorResponse } from '../Services'
+import pako from 'pako'
 
 const _logTimer = (new Date()).getTime()
 
@@ -16,6 +16,10 @@ export function dT() {
 export function tsNow(seconds) {
     var t = +new Date()
     return seconds ? Math.floor(t / 1000) : t
+}
+
+export function md5(data) {
+    return CryptoJS.MD5(bytesToWords(data)).toString();
 }
 
 export function bigint(num) {
@@ -381,6 +385,7 @@ export function addPadding(bytes, blockSize, zeroes) {
     return bytes
 }
 
+
 export function aesEncryptSync(bytes, keyBytes, ivBytes) {
     var len = bytes.byteLength || bytes.length
 
@@ -420,8 +425,12 @@ export function toArrayBuffer(buf) {
 }
 
 export function gzipUncompress(bytes) {
-    var result = zlib.gunzipSync(bytes)
+    var result = pako.inflate(bytes)
     return toArrayBuffer(result)
+}
+
+export function inflate(bytes) {
+    return pako.inflate(bytes, { to: 'string' });
 }
 
 export function nextRandomInt(maxValue) {
@@ -435,14 +444,14 @@ export function pqPrimeFactorization(pqBytes) {
     try {
         result = pqPrimeLeemon(str2bigInt(what.toString(16), 16, Math.ceil(64 / getBpe()) + 1))
     } catch (e) {
-        LogService.logError(`[utils] pqPrimeFactorization() pqPrimeLeemon() ${new ErrorResponse(e)}`)
+        // LogService.logError(`[utils] pqPrimeFactorization() pqPrimeLeemon() ${new ErrorResponse(e)}`)
     }
 
     if (result === false && what.bitLength() <= 64) {
         try {
             result = pqPrimeLong(goog.math.Long.fromString(what.toString(16), 16))
         } catch (e) {
-            LogService.logError(`[utils] pqPrimeFactorization() pqPrimeLong() ${new ErrorResponse(e)}`)
+            // LogService.logError(`[utils] pqPrimeFactorization() pqPrimeLong() ${new ErrorResponse(e)}`)
         }
     }
 
@@ -669,7 +678,7 @@ export function bytesModPow(x, y, m) {
 
         return bytesFromHex(bigInt2str(resBigInt, 16))
     } catch (e) {
-        LogService.logError(`[utils] bytesModPow() ${new ErrorResponse(e)}`)
+        // LogService.logError(`[utils] bytesModPow() ${new ErrorResponse(e)}`)
     }
 
     return bytesFromBigInt(new BigInteger(x).modPow(new BigInteger(y), new BigInteger(m)), 256)

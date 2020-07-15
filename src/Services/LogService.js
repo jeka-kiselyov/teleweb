@@ -1,5 +1,4 @@
-import moment from 'moment'
-import * as DateTimeService from './DateTimeService'
+// import * as DateTimeService from './DateTimeService'
 
 const LEVELS = {
     debug: {
@@ -19,7 +18,6 @@ const LEVELS = {
         description: 'error'
     }
 }
-const DATETIME_FORMAT = DateTimeService.getDefaultDateTimeFormat()
 
 let sourceName = null
 let minLevel = null
@@ -73,5 +71,5 @@ const composeMessage = (levelDescription, message) => {
         throw new Error('LogService is not initialized!')
     }
 
-    return `${moment().format(DATETIME_FORMAT)}: [${sourceName}] [${levelDescription}] ${message}`
+    return `: [${sourceName}] [${levelDescription}] ${message}`
 }

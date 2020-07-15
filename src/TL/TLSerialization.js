@@ -1,7 +1,9 @@
 import { intToUint, bytesToHex, bigStringInt, bigint, uintToInt, gzipUncompress, bytesToArrayBuffer } from '../Utils'
 import Config from '../config'
 import { bytesFromArrayBuffer } from '../Utils/utils'
-import { LogService, ErrorResponse } from '../Services'
+import { ErrorResponse } from '../Services'
+
+// console.log(Config.Modes);
 
 export function TLSerialization(options) {
     options = options || {}
@@ -55,7 +57,7 @@ TLSerialization.prototype.checkLength = function (needBytes) {
         return
     }
 
-    LogService.logDebug(`[TLSerialization] checkLength() ${this.offset} ${needBytes} ${this.maxLength}`)
+    //LogService.logDebug(`[TLSerialization] checkLength() ${this.offset} ${needBytes} ${this.maxLength}`)
 
     this.maxLength = Math.ceil(Math.max(this.maxLength * 2, this.offset + needBytes + 16) / 4) * 4
     var previousBuffer = this.buffer
@@ -67,7 +69,7 @@ TLSerialization.prototype.checkLength = function (needBytes) {
 }
 
 TLSerialization.prototype.writeInt = function (i, field) {
-    LogService.logDebug(`[TLSerialization] writeInt() ${i}  ${i} ${field}`)
+    //LogService.logDebug(`[TLSerialization] writeInt() ${i}  ${i} ${field}`)
 
     this.checkLength(4)
     this.intView[this.offset / 4] = i
@@ -121,7 +123,7 @@ TLSerialization.prototype.storeDouble = function (f, field) {
 }
 
 TLSerialization.prototype.storeString = function (s, field) {
-    LogService.logDebug(`[TLSerialization] storeString() ${s} ${(field || '') + ':string'}`)
+    //LogService.logDebug(`[TLSerialization] storeString() ${s} ${(field || '') + ':string'}`)
 
     if (s === undefined) {
         s = ''
@@ -152,12 +154,20 @@ TLSerialization.prototype.storeString = function (s, field) {
 TLSerialization.prototype.storeBytes = function (bytes, field) {
     if (bytes instanceof ArrayBuffer) {
         bytes = new Uint8Array(bytes)
-    }
-    else if (bytes === undefined) {
+    } else if (bytes && !bytes.name && bytes[0] !== undefined) {
+        // serialized and deserialized json  uintarray
+        let a = [];
+        let i = 0;
+        while (bytes[i] || bytes[i] === 0) {
+            a.push(bytes[i]);
+            i++;
+        }
+        bytes = new Uint8Array(a);
+    } else if (bytes === undefined) {
         bytes = []
     }
 
-    LogService.logDebug(`[TLSerialization] storeBytes() ${bytesToHex(bytes)} ${(field || '') + ':bytes'}`)
+    //LogService.logDebug(`[TLSerialization] storeBytes() ${bytesToHex(bytes)} ${(field || '') + ':bytes'}`)
 
     var len = bytes.byteLength || bytes.length
     this.checkLength(len + 8)
@@ -188,7 +198,7 @@ TLSerialization.prototype.storeIntBytes = function (bytes, bits, field) {
         throw new Error('Invalid bits: ' + bits + ', ' + bytes.length)
     }
 
-    LogService.logDebug(`[TLSerialization] storeIntBytes() ${bytesToHex(bytes)} ${(field || '') + ':int' + bits}`)
+    //LogService.logDebug(`[TLSerialization] storeIntBytes() ${bytesToHex(bytes)} ${(field || '') + ':int' + bits}`)
 
     this.checkLength(len)
 
@@ -202,7 +212,7 @@ TLSerialization.prototype.storeRawBytes = function (bytes, field) {
     }
     var len = bytes.length
 
-    LogService.logDebug(`[TLSerialization] storeRawBytes() ${bytesToHex(bytes)} ${(field || '')}`)
+    //LogService.logDebug(`[TLSerialization] storeRawBytes() ${bytesToHex(bytes)} ${(field || '')}`)
 
     this.checkLength(len)
 
@@ -225,6 +235,7 @@ TLSerialization.prototype.storeMethod = function (methodName, params) {
         throw new Error('No method ' + methodName + ' found')
     }
 
+
     this.storeInt(intToUint(methodData.id), methodName + '[id]')
 
     var param, type
@@ -234,14 +245,18 @@ TLSerialization.prototype.storeMethod = function (methodName, params) {
     for (i = 0; i < len; i++) {
         param = methodData.params[i]
         type = param.type
+
         if (type.indexOf('?') !== -1) {
             condType = type.split('?')
             fieldBit = condType[0].split('.')
             if (!(params[fieldBit[0]] & (1 << fieldBit[1]))) {
                 continue
+
+
             }
             type = condType[1]
         }
+
 
         this.storeObject(params[param.name], type, methodName + '[' + param.name + ']')
     }
@@ -366,7 +381,7 @@ TLDeserialization.prototype.readInt = function (field) {
     }
     var i = this.intView[this.offset / 4]
 
-    LogService.logDebug(`[TLSerialization] readInt() ${i.toString(16)} ${i} ${field}`)
+    //LogService.logDebug(`[TLSerialization] readInt() ${i.toString(16)} ${i} ${field}`)
 
     this.offset += 4
 
@@ -433,7 +448,7 @@ TLDeserialization.prototype.fetchString = function (field) {
         var s = sUTF8
     }
 
-    LogService.logDebug(`[TLSerialization] fetchString() ${s} ${(field || '') + ':string'}`)
+    //LogService.logDebug(`[TLSerialization] fetchString() ${s} ${(field || '') + ':string'}`)
 
     return s
 }
@@ -455,7 +470,7 @@ TLDeserialization.prototype.fetchBytes = function (field) {
         this.offset++
     }
 
-    LogService.logDebug(`[TLSerialization] fetchBytes() ${bytesToHex(bytes)} ${(field || '') + ':bytes'}`)
+    //LogService.logDebug(`[TLSerialization] fetchBytes() ${bytesToHex(bytes)} ${(field || '') + ':bytes'}`)
 
     return bytes
 }
@@ -477,7 +492,7 @@ TLDeserialization.prototype.fetchIntBytes = function (bits, typed, field) {
         bytes.push(this.byteView[this.offset++])
     }
 
-    LogService.logDebug(`[TLSerialization] fetchIntBytes() ${bytesToHex(bytes)} ${(field || '') + ':int' + bits}`)
+    //LogService.logDebug(`[TLSerialization] fetchIntBytes() ${bytesToHex(bytes)} ${(field || '') + ':int' + bits}`)
 
     return bytes
 }
@@ -502,7 +517,7 @@ TLDeserialization.prototype.fetchRawBytes = function (len, typed, field) {
         bytes.push(this.byteView[this.offset++])
     }
 
-    LogService.logDebug(`[TLSerialization] fetchRawBytes() ${bytesToHex(bytes)} ${(field || '')}`)
+    //LogService.logDebug(`[TLSerialization] fetchRawBytes() ${bytesToHex(bytes)} ${(field || '')}`)
 
     return bytes
 }
@@ -594,7 +609,7 @@ TLDeserialization.prototype.fetchObject = function (type, field) {
         var constructor = this.readInt(field + '[id]')
         var constructorCmp = uintToInt(constructor)
 
-        if (constructorCmp == 0x3072cfa1) { // Gzip packed            
+        if (constructorCmp == 0x3072cfa1) { // Gzip packed
             var compressed = this.fetchBytes(field + '[packed_string]')
             var buffer = gzipUncompress(Buffer.from(compressed))
             var newDeserializer = (new TLDeserialization(buffer))

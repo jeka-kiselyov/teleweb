@@ -5,8 +5,8 @@ import {
     BigInteger, nextRandomInt, dT, bytesToHex, bytesCmp,  pqPrimeFactorization, SecureRandom, sha1BytesSync, rsaEncrypt,
     tsNow, aesDecryptSync, aesEncryptSync, bytesToArrayBuffer, bytesFromHex, bytesModPow, bytesXor
 } from '../Utils'
-import { LogService, ErrorResponse } from '../Services'
-import { networkRequest } from '../network'
+import { ErrorResponse } from '../Services'
+import { networkRequest, flushSockets } from '../network'
 
 const mtpSendPlainRequest = (dcID, requestBuffer) => new Promise((resolve, reject) => {
     var requestLength = requestBuffer.byteLength,
@@ -31,7 +31,7 @@ const mtpSendPlainRequest = (dcID, requestBuffer) => new Promise((resolve, rejec
     var url = MtpDcConfigurator.chooseServer(dcID)
     var baseError = { code: 406, type: 'NETWORK_BAD_RESPONSE', url: url }
 
-    networkRequest(url, resultArray).then((result) => {
+    networkRequest(url, dcID, resultArray).then((result) => {
         if (!result.data || !result.data.byteLength) {
             reject(baseError)
         }
@@ -43,7 +43,7 @@ const mtpSendPlainRequest = (dcID, requestBuffer) => new Promise((resolve, rejec
 
         resolve(deserializer)
     })
-        .catch(err => reject({ ...baseError, originalError: err }))
+        .catch(err => { reject({ ...baseError, originalError: err }) });
 })
 
 function mtpSendReqPQ(auth) {
@@ -53,7 +53,7 @@ function mtpSendReqPQ(auth) {
 
     request.storeMethod('req_pq', { nonce: auth.nonce })
 
-    LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() Send req_pq ${bytesToHex(auth.nonce)}`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() Send req_pq ${bytesToHex(auth.nonce)}`)
 
     mtpSendPlainRequest(auth.dcID, request.getBuffer())
         .then((deserializer) => {
@@ -72,7 +72,7 @@ function mtpSendReqPQ(auth) {
             auth.pq = response.pq
             auth.fingerprints = response.server_public_key_fingerprints
 
-            LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() Got ResPQ ${bytesToHex(auth.serverNonce)} ${bytesToHex(auth.pq)} ${auth.fingerprints}`)
+            //LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() Got ResPQ ${bytesToHex(auth.serverNonce)} ${bytesToHex(auth.pq)} ${auth.fingerprints}`)
 
             auth.publicKey = MtpRsaKeysManager.select(auth.fingerprints)
 
@@ -80,7 +80,7 @@ function mtpSendReqPQ(auth) {
                 throw new Error('[MT] No public key found')
             }
 
-            LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() 'PQ factorization start ${auth.pq}`)
+            //LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() 'PQ factorization start ${auth.pq}`)
 
             const pAndQ = pqPrimeFactorization(auth.pq)
 
@@ -91,12 +91,12 @@ function mtpSendReqPQ(auth) {
             auth.p = pAndQ[0]
             auth.q = pAndQ[1]
 
-            LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() 'PQ factorization done ${pAndQ[2]}`)
+            //LogService.logVerbose(`[MtpAuthorizer] mtpSendReqPQ() 'PQ factorization done ${pAndQ[2]}`)
 
             mtpSendReqDhParams(auth)
         })
         .catch(err => {
-            LogService.logError(`[MtpAuthorizer] mtpSendReqPQ() ${new ErrorResponse(err)}`)
+            //LogService.logError(`[MtpAuthorizer] mtpSendReqPQ() ${new ErrorResponse(err)}`)
             deferred.reject(err)
         })
 
@@ -132,7 +132,7 @@ function mtpSendReqDhParams(auth) {
         encrypted_data: rsaEncrypt(auth.publicKey, dataWithHash)
     })
 
-    LogService.logVerbose(`[MtpAuthorizer] mtpSendReqDhParams()`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpSendReqDhParams()`)
 
     mtpSendPlainRequest(auth.dcID, request.getBuffer()).then(function (deserializer) {
         var response = deserializer.fetchObject('Server_DH_Params', 'RESPONSE')
@@ -202,7 +202,7 @@ function mtpDecryptServerDhDataAnswer(auth, encryptedAnswer) {
         throw new Error('[MT] server_DH_inner_data serverNonce mismatch')
     }
 
-    LogService.logVerbose(`[MtpAuthorizer] mtpDecryptServerDhDataAnswer() Done decrypting answer`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpDecryptServerDhDataAnswer() Done decrypting answer`)
 
     auth.g = response.g
     auth.dhPrime = response.dh_prime
@@ -223,7 +223,7 @@ function mtpDecryptServerDhDataAnswer(auth, encryptedAnswer) {
 }
 
 function mtpVerifyDhParams(g, dhPrime, gA) {
-    LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() Verifying DH params`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() Verifying DH params`)
 
     var dhPrimeHex = bytesToHex(dhPrime)
     if (g != 3 ||
@@ -232,7 +232,7 @@ function mtpVerifyDhParams(g, dhPrime, gA) {
         throw new Error('[MT] DH params are not verified: unknown dhPrime')
     }
 
-    LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() dhPrime cmp OK`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() dhPrime cmp OK`)
 
     var gABigInt = new BigInteger(bytesToHex(gA), 16)
     var dhPrimeBigInt = new BigInteger(dhPrimeHex, 16)
@@ -245,7 +245,7 @@ function mtpVerifyDhParams(g, dhPrime, gA) {
         throw new Error('[MT] DH params are not verified: gA >= dhPrime - 1')
     }
 
-    LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() 1 < gA < dhPrime-1 OK`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() 1 < gA < dhPrime-1 OK`)
 
     var two = new BigInteger(null)
     two.fromInt(2)
@@ -258,7 +258,7 @@ function mtpVerifyDhParams(g, dhPrime, gA) {
         throw new Error('[MT] DH params are not verified: gA > dhPrime - 2^{2048-64}')
     }
 
-    LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() 2^{2048-64} < gA < dhPrime-2^{2048-64} OK`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpVerifyDhParams() 2^{2048-64} < gA < dhPrime-2^{2048-64} OK`)
 
     return true
 }
@@ -291,7 +291,7 @@ function mtpSendSetClientDhParams(auth) {
         encrypted_data: encryptedData
     })
 
-    LogService.logVerbose(`[MtpAuthorizer] mtpSendSetClientDhParams() Send set_client_DH_params`)
+    //LogService.logVerbose(`[MtpAuthorizer] mtpSendSetClientDhParams() Send set_client_DH_params`)
 
     mtpSendPlainRequest(auth.dcID, request.getBuffer()).then(function (deserializer) {
         var response = deserializer.fetchObject('Set_client_DH_params_answer')
@@ -316,7 +316,7 @@ function mtpSendSetClientDhParams(auth) {
             authKeyAux = authKeyHash.slice(0, 8),
             authKeyID = authKeyHash.slice(-8)
 
-        LogService.logVerbose(`[MtpAuthorizer] mtpSendSetClientDhParams() Got Set_client_DH_params_answer ${response._}`)
+        //LogService.logVerbose(`[MtpAuthorizer] mtpSendSetClientDhParams() Got Set_client_DH_params_answer ${response._}`)
 
         switch (response._) {
             case 'dh_gen_ok':
@@ -360,12 +360,18 @@ function mtpSendSetClientDhParams(auth) {
     })
 }
 
-const cached = {}
+let cached = {};
 
-const mtpAuth = (dcID) => new Promise((resolve, reject) => {
-    if (cached[dcID] !== undefined) {
-        return cached[dcID]
-    }
+export const flushCachedNetworkers = () => {
+    cached = {};
+    flushSockets();
+};
+
+const mtpAuth = (dcID, noCache) => new Promise((resolve, reject) => {
+
+    // if (cached[dcID] !== undefined) {
+    //     return cached[dcID]
+    // }
 
     var nonce = []
     for (var i = 0; i < 16; i++) {
@@ -376,15 +382,21 @@ const mtpAuth = (dcID) => new Promise((resolve, reject) => {
         throw new Error('[MT] No server found for dc ' + dcID)
     }
 
+
+    var url = MtpDcConfigurator.chooseServer(dcID);
+    flushSockets(url, dcID);
+
     var auth = {
         dcID: dcID,
         nonce: nonce,
         deferred: {
-            resolve: (obj) => resolve(obj), reject: (err) => reject(err)
+            resolve: (obj) => resolve(obj), reject: (err) => { reject(err); }
         }
     }
 
-    mtpSendReqPQ(auth)
+
+    mtpSendReqPQ(auth);
 })
+
 
 export const auth = mtpAuth

@@ -1,9 +1,12 @@
-import { tsNow, dT, nextRandomInt, longFromInts } from '../Utils'
+import { tsNow, dT, nextRandomInt, longFromInts, longToInts } from '../Utils'
 import { getState, setState } from '../state'
-import { LogService, ErrorResponse } from '../Services'
+import { ErrorResponse } from '../Services'
+import { str2bigInt, greater, addInt, bigInt2str, modInt } from '../Utils/leemonBigInt'
 
 let lastMessageID = [0, 0]
+let lastBigInt = null;
 let timeOffset = 0
+let lastServerBigInt = null;
 
 const to = getState().server_time_offset
 
@@ -23,9 +26,44 @@ function generateMessageID() {
         messageID = [lastMessageID[0], lastMessageID[1] + 4]
     }
 
-    lastMessageID = messageID
+    var longFrom = longFromInts(messageID[0], messageID[1]);
+    lastBigInt = str2bigInt(longFrom, 10);
+    lastMessageID = messageID;
 
-    return longFromInts(messageID[0], messageID[1])
+    if (lastServerBigInt && greater(lastServerBigInt, lastBigInt)) {
+        //18: incorrect two lower order msg_id bits (the server expects client message msg_id to be divisible by 4)
+        lastServerBigInt = addInt(lastServerBigInt, 100000-modInt(lastServerBigInt, 4));
+        return bigInt2str(lastServerBigInt, 10);
+    } else {
+        return longFrom;
+    }
+}
+
+function setLastMessageID(str) {
+
+    let toSet = str2bigInt(str, 10);
+
+    if (lastServerBigInt && greater(lastServerBigInt, toSet)) {
+
+    } else {
+        // console.error('setLastMessageID', str);
+        lastServerBigInt = toSet;
+    }
+
+    // console.warn('was', lastBigInt);
+    // console.warn('to', toSet);
+
+    // if (greater(toSet, lastBigInt)) {
+    //     shiftOffset+=60;
+    //     console.warn('was greater');
+    // }
+
+
+    // if (toSet[0] > lastMessageID[0] ||
+    //     toSet[0] == lastMessageID[0] && toSet[1] >= lastMessageID[1]) {
+    //     console.warn('was greater');
+    //     lastMessageID = [toSet[0], toSet[1] + 4]
+    // }
 }
 
 export function applyServerTime(serverTime, localTime) {
@@ -41,5 +79,6 @@ export function applyServerTime(serverTime, localTime) {
 }
 
 export const generateID = generateMessageID
+export const setLastID = setLastMessageID
 
 

@@ -3,14 +3,19 @@ import { MtpTimeManager, MtpDcConfigurator, MtpRsaKeysManager } from '../Mtp'
 import {
     SecureRandom, convertToUint8Array, convertToArrayBuffer,
     sha1BytesSync, dT, tsNow, nextRandomInt, bufferConcat, sha256HashSync, aesEncryptSync,
-    bytesCmp, aesDecryptSync, bytesToArrayBuffer, bytesToHex, longToBytes, uintToInt
+    bytesCmp, aesDecryptSync, bytesToArrayBuffer, bytesToHex, longToBytes, uintToInt,
+    bigStringInt
 } from '../Utils'
 import { TLSerialization, TLDeserialization } from '../TL'
 import { networkRequest } from '../network'
 import { setState, getState } from '../state'
-import { LogService, ErrorResponse } from '../Services'
+import { ErrorResponse } from '../Services'
 
-var updatesProcessor
+var updatesProcessor = (message)=>{
+    // console.log('MM:');
+    console.log(message);
+};
+
 var iii = 0,
     offline
 var offlineInited = false
@@ -18,6 +23,8 @@ var akStopped = false
 
 function MtpNetworker(dcID, authKey, serverSalt, options) {
     options = options || {}
+
+    this.signedIn = false
 
     this.dcID = dcID
     this.iii = iii++
@@ -38,6 +45,7 @@ function MtpNetworker(dcID, authKey, serverSalt, options) {
     this.currentRequests = 0
     this.checkConnectionPeriod = 0
 
+    // console.warn('this.sentMessages = {}')
     this.sentMessages = {}
     this.clientMessages = []
 
@@ -147,7 +155,7 @@ MtpNetworker.prototype.wrapMtpCall = function (method, params, options) {
         body: serializer.getBytes()
     }
 
-    LogService.logVerbose(`[MtpNetworker] wrapMtpCall() ${method} ${JSON.stringify(params, 0, 2)}`)
+    //LogService.logVerbose(`[MtpNetworker] wrapMtpCall() ${method} ${JSON.stringify(params, 0, 2)}`)
 
     return this.pushMessage(message, options)
 }
@@ -166,18 +174,21 @@ MtpNetworker.prototype.wrapMtpMessage = function (object, options) {
         body: serializer.getBytes()
     }
 
-    LogService.logVerbose(`[MtpNetworker] wrapMtpMessage ${JSON.stringify(object, 0, 2)} ${messageID} ${seqNo}`)
+
+    //LogService.logVerbose(`[MtpNetworker] wrapMtpMessage ${JSON.stringify(object, 0, 2)} ${messageID} ${seqNo}`)
 
     return this.pushMessage(message, options)
 }
 
 MtpNetworker.prototype.wrapApiCall = function (method, params, options) {
+
     return new Promise((resolve, reject) => {
         const serializer = new TLSerialization(options)
 
         if (!this.connectionInited) {
             serializer.storeInt(0xda9b0d0d, 'invokeWithLayer')
             serializer.storeInt(Config.Schema.API.layer, 'layer')
+
             serializer.storeInt(0x69796de9, 'initConnection')
             serializer.storeInt(Config.App.id, 'api_id')
             serializer.storeString('Unknown UserAgent', 'device_model')
@@ -202,10 +213,19 @@ MtpNetworker.prototype.wrapApiCall = function (method, params, options) {
             isAPI: true
         }
 
-        LogService.logVerbose(`[MtpNetworker] wrapApiCall() ${method} ${JSON.stringify(params, 0, 2)} ${messageID} ${seqNo} ${JSON.stringify(options, 0, 2)}`)
+        //LogService.logVerbose(`[MtpNetworker] wrapApiCall() ${method} ${JSON.stringify(params, 0, 2)} ${messageID} ${seqNo} ${JSON.stringify(options, 0, 2)}`)
+
 
         this.pushMessage(message, options)
-            .then(res => resolve(res))
+            .then(res => {
+                if (res) {
+                    if (res._ == 'userFull' || res.user) {
+                        this.signedIn = true;
+                    }
+                }
+
+                resolve(res);
+            })
             .catch(err => reject(err))
     })
 }
@@ -230,7 +250,7 @@ MtpNetworker.prototype.checkLongPoll = function (force) {
     })
 }
 
-MtpNetworker.prototype.sendLongPoll = function () {
+MtpNetworker.prototype.sendLongPoll = function (cb) {
     var maxWait = 25000
     var self = this
 
@@ -245,9 +265,11 @@ MtpNetworker.prototype.sendLongPoll = function () {
             longPoll: true
         }).then(function () {
             delete self.longPollPending
-            self.checkLongPoll.bind(self)()
+            cb();
+            // self.checkLongPoll.bind(self)()
         }, function (error) {
-            LogService.logError(`[MtpNetworker] sendLongPoll() ${new ErrorResponse(error)}`)
+            //LogService.logError(`[MtpNetworker] sendLongPoll() ${new ErrorResponse(error)}`)
+            cb();
         })
 }
 
@@ -320,9 +342,9 @@ MtpNetworker.prototype.getAesKeyIv = function (msgKey, isOut) {
 }
 
 MtpNetworker.prototype.checkConnection = function (event) {
-    $rootScope.offlineConnecting = true
+    // $rootScope.offlineConnecting = true
 
-    LogService.logVerbose(`[MtpNetworker] checkConnection()`)
+    // LogService.logVerbose(`[MtpNetworker] checkConnection()`)
     //$timeout.cancel(this.checkConnectionPromise)
 
     var serializer = new TLSerialization({ mtproto: true })
@@ -344,7 +366,7 @@ MtpNetworker.prototype.checkConnection = function (event) {
             */
         })
         .catch(function () {
-            LogService.logVerbose(`[MtpNetworker] checkConnection() Delay ${self.checkConnectionPeriod * 1000}`)
+            // LogService.logVerbose(`[MtpNetworker] checkConnection() Delay ${self.checkConnectionPeriod * 1000}`)
             //self.checkConnectionPromise = $timeout(self.checkConnection.bind(self), parseInt(self.checkConnectionPeriod * 1000))
             self.checkConnectionPeriod = Math.min(60, self.checkConnectionPeriod * 1.5)
             /*
@@ -356,7 +378,7 @@ MtpNetworker.prototype.checkConnection = function (event) {
 }
 
 MtpNetworker.prototype.toggleOffline = function (enabled) {
-    LogService.logVerbose(`[MtpNetworker] toggleOffline() ${enabled}`)
+    // LogService.logVerbose(`[MtpNetworker] toggleOffline() ${enabled}`)
 
     if (this.offline !== undefined && this.offline == enabled) {
         return false
@@ -379,22 +401,22 @@ MtpNetworker.prototype.toggleOffline = function (enabled) {
         this.checkConnectionPromise = $timeout(this.checkConnection.bind(this), parseInt(this.checkConnectionPeriod * 1000))
         this.checkConnectionPeriod = Math.min(30, (1 + this.checkConnectionPeriod) * 1.5)
 
-        this.onOnlineCb = this.checkConnection.bind(this)        
+        this.onOnlineCb = this.checkConnection.bind(this)
     } else {
         delete this.longPollPending
         this.checkLongPoll()
         this.sheduleRequest()
-      
+
         $timeout.cancel(this.checkConnectionPromise)
     }
     */
 }
 
 MtpNetworker.prototype.performSheduledRequest = function () {
-    LogService.logVerbose(`[MtpNetworker] performSheduledRequest()`)
+    //LogService.logVerbose(`[MtpNetworker] performSheduledRequest()`)
 
     if (this.offline || akStopped) {
-        LogService.logVerbose(`[MtpNetworker] performSheduledRequest() Cancel sheduled`)
+        //LogService.logVerbose(`[MtpNetworker] performSheduledRequest() Cancel sheduled`)
         return false
     }
 
@@ -464,17 +486,17 @@ MtpNetworker.prototype.performSheduledRequest = function () {
     })
 
     if (hasApiCall && !hasHttpWait) {
-        var serializer = new TLSerialization({ mtproto: true })
-        serializer.storeMethod('http_wait', {
-            max_delay: 500,
-            wait_after: 150,
-            max_wait: 3000
-        })
-        messages.push({
-            msg_id: MtpTimeManager.generateID(),
-            seq_no: this.generateSeqNo(),
-            body: serializer.getBytes()
-        })
+        // var serializer = new TLSerialization({ mtproto: true })
+        // serializer.storeMethod('http_wait', {
+        //     max_delay: 500,
+        //     wait_after: 150,
+        //     max_wait: 3000
+        // })
+        // messages.push({
+        //     msg_id: MtpTimeManager.generateID(),
+        //     seq_no: this.generateSeqNo(),
+        //     body: serializer.getBytes()
+        // })
     }
 
     if (!messages.length) {
@@ -511,7 +533,7 @@ MtpNetworker.prototype.performSheduledRequest = function () {
 
         this.sentMessages[message.msg_id] = containerSentMessage
 
-        LogService.logVerbose(`[MtpNetworker] performSheduledRequest() Container ${JSON.stringify(innerMessages, 0, 2)} ${message.msg_id} ${message.seq_no}`)
+        //LogService.logVerbose(`[MtpNetworker] performSheduledRequest() Container ${JSON.stringify(innerMessages, 0, 2)} ${message.msg_id} ${message.seq_no}`)
     } else {
         if (message.noResponse) {
             noResponseMsgs.push(message.msg_id)
@@ -519,16 +541,19 @@ MtpNetworker.prototype.performSheduledRequest = function () {
         this.sentMessages[message.msg_id] = message
     }
 
+
     this.pendingAcks = []
 
-    LogService.logVerbose(`[MtpNetworker] performSheduledRequest() sendEncryptedRequest(${JSON.stringify(message, 0, 2)})`)
+    //LogService.logVerbose(`[MtpNetworker] performSheduledRequest() sendEncryptedRequest(${JSON.stringify(message, 0, 2)})`)
+
 
     this.sendEncryptedRequest(message).then(function (result) {
         self.toggleOffline(false)
 
         const response = self.parseResponse(result.data)
+        MtpTimeManager.setLastID(response.messageID);
 
-        LogService.logVerbose(`[MtpNetworker] performSheduledRequest() sendEncryptedRequest() Server response ${self.dcID} ${JSON.stringify(response, 0, 2)}`)
+        //LogService.logVerbose(`[MtpNetworker] performSheduledRequest() sendEncryptedRequest() Server response ${self.dcID} ${JSON.stringify(response, 0, 2)}`)
 
         self.processMessage(response.response, response.messageID, response.sessionID)
 
@@ -546,6 +571,7 @@ MtpNetworker.prototype.performSheduledRequest = function () {
 
     })
         .catch(error => {
+
             if (message.container) {
                 message.inner.forEach(function (msgID) {
                     self.pendingMessages[msgID] = 0
@@ -574,6 +600,18 @@ MtpNetworker.prototype.performSheduledRequest = function () {
     */
 }
 
+MtpNetworker.prototype.networkCallback = function (result) {
+
+    try {
+        this.toggleOffline(false);
+        const response = this.parseResponse(result.data)
+        MtpTimeManager.setLastID(response.messageID);
+        this.processMessage(response.response, response.messageID, response.sessionID);
+    } catch(e) {
+        console.error(e);
+    }
+}
+
 MtpNetworker.prototype.getEncryptedMessage = function (dataWithPadding) {
     var self = this
     const msgKey = self.getMsgKey(dataWithPadding, true)
@@ -591,6 +629,7 @@ MtpNetworker.prototype.getDecryptedMessage = function (msgKey, encryptedData) {
 }
 
 MtpNetworker.prototype.sendEncryptedRequest = function (message, options = {}) {
+
     return new Promise((resolve, reject) => {
         var self = this
         options = options || {}
@@ -626,7 +665,11 @@ MtpNetworker.prototype.sendEncryptedRequest = function (message, options = {}) {
         var url = MtpDcConfigurator.chooseServer(self.dcID)
         var baseError = { code: 406, type: 'NETWORK_BAD_RESPONSE', url: url }
 
-        networkRequest(url, requestData).then(
+        var networkCallback = (data) => {
+            this.networkCallback(data);
+        };
+
+        networkRequest(url, self.dcID, requestData, networkCallback).then(
             function (result) {
                 if (!result.data || !result.data.byteLength) {
                     reject(baseError)
@@ -634,10 +677,11 @@ MtpNetworker.prototype.sendEncryptedRequest = function (message, options = {}) {
                 resolve(result)
             })
             .catch(error => {
+                console.error(error);
                 if (!error.message && !error.type) {
                     error = { ...baseError, type: 'NETWORK_BAD_REQUEST', originalError: error }
                 }
-                LogService.logError(`[MtpNetworker] sendEncryptedRequest() ${error.message}`)
+                //LogService.logError(`[MtpNetworker] sendEncryptedRequest() ${error.message}`)
                 reject(error)
             })
     })
@@ -658,19 +702,19 @@ MtpNetworker.prototype.parseResponse = function (responseBuffer) {
 
     var authKeyID = deserializer.fetchIntBytes(64, false, 'auth_key_id')
 
-    if (!bytesCmp(authKeyID, this.authKeyID)) {
-        throw new Error('[MT] Invalid server auth_key_id: ' + bytesToHex(authKeyID))
-    }
+
     var msgKey = deserializer.fetchIntBytes(128, true, 'msg_key')
     var encryptedData = deserializer.fetchRawBytes(responseBuffer.byteLength - deserializer.getOffset(), true, 'encrypted_data')
 
     const dataWithPadding = toArrayBuffer(self.getDecryptedMessage(msgKey, encryptedData))
     const calcMsgKey = self.getMsgKey(dataWithPadding, false)
     if (!bytesCmp(msgKey, calcMsgKey)) {
-        LogService.logError(`[MtpNetworker] parseResponse() server msgKey mismatch: ${bytesFromArrayBuffer(calcMsgKey)}`)
+        //LogService.logError(`[MtpNetworker] parseResponse() server msgKey mismatch: ${bytesFromArrayBuffer(calcMsgKey)}`)
         throw new Error('[MT] server msgKey mismatch')
     }
-
+    // if (!bytesCmp(authKeyID, this.authKeyID)) {
+    //     throw new Error('[MT] Invalid server auth_key_id: ' + bytesToHex(authKeyID))
+    // }
     var deserializer = new TLDeserialization(dataWithPadding, { mtproto: true })
 
     var salt = deserializer.fetchIntBytes(64, false, 'salt')
@@ -679,8 +723,8 @@ MtpNetworker.prototype.parseResponse = function (responseBuffer) {
 
     if (!bytesCmp(sessionID, self.sessionID) &&
         (!self.prevSessionID || !bytesCmp(sessionID, self.prevSessionID))) {
-        LogService.logError(`[MtpNetworker] parseResponse() Invalid server session_id: ${bytesToHex(sessionID)}`)
-        throw new Error('[MT] Invalid server session_id: ' + bytesToHex(sessionID))
+        //LogService.logError(`[MtpNetworker] parseResponse() Invalid server session_id: ${bytesToHex(sessionID)}`)
+        // throw new Error('[MT] Invalid server session_id: ' + bytesToHex(sessionID))
     }
 
     var seqNo = deserializer.fetchInt('seq_no')
@@ -714,7 +758,7 @@ MtpNetworker.prototype.parseResponse = function (responseBuffer) {
                 try {
                     result.body = this.fetchObject('Object', field + '[body]')
                 } catch (e) {
-                    LogService.logError(`[MtpNetworker] parseResponse() parse error: ${new ErrorResponse(e)}`)
+                    //LogService.logError(`[MtpNetworker] parseResponse() parse error: ${new ErrorResponse(e)}`)
                     result.body = { _: 'parse_error', error: e }
                 }
                 if (this.offset != offset + result.bytes) {
@@ -728,6 +772,7 @@ MtpNetworker.prototype.parseResponse = function (responseBuffer) {
                 var type = sentMessage && sentMessage.resultType || 'Object'
 
                 if (result.req_msg_id && !sentMessage) {
+
                     return
                 }
                 result.result = this.fetchObject(type, field + '[result]')
@@ -736,6 +781,7 @@ MtpNetworker.prototype.parseResponse = function (responseBuffer) {
     }
     var deserializer = new TLDeserialization(buffer, deserializerOptions)
     var response = deserializer.fetchObject('', 'INPUT')
+
 
     return {
         response: response,
@@ -751,7 +797,7 @@ MtpNetworker.prototype.applyServerSalt = function (newServerSalt) {
     const newNetworkers = getState().networkers
     let networker = newNetworkers.find(nw => nw.id == this.dcID)
     if (!networker) {
-        throw new Error(`Networker with dcID = ${thid.dcID} not found in the state`)
+        throw new Error(`Networker with dcID = ${this.dcID} not found in the state`)
     }
 
     networker.auth.serverSalt = serverSalt
@@ -784,13 +830,13 @@ MtpNetworker.prototype.sheduleRequest = function (delay) {
 }
 
 MtpNetworker.prototype.ackMessage = function (msgID) {
-    LogService.logVerbose(`[MtpNetworker] ackMessage() ${msgID}`)
+    //LogService.logVerbose(`[MtpNetworker] ackMessage() ${msgID}`)
     this.pendingAcks.push(msgID)
     this.sheduleRequest(30000)
 }
 
 MtpNetworker.prototype.reqResendMessage = function (msgID) {
-    LogService.logVerbose(`[MtpNetworker] reqResendMessage() ${msgID}`)
+    //LogService.logVerbose(`[MtpNetworker] reqResendMessage() ${msgID}`)
     this.pendingResends.push(msgID)
     this.sheduleRequest(100)
 }
@@ -845,9 +891,11 @@ MtpNetworker.prototype.processError = function (rawError) {
 }
 
 MtpNetworker.prototype.processMessage = function (message, messageID, sessionID) {
+
     var msgidInt = parseInt(messageID.toString(10).substr(0, -10), 10)
     if (msgidInt % 2) {
-        LogService.logInfo(`[MtpNetworker] processMessage() Server even message id ${messageID}`)
+        console.error('Server even message ID');
+        //LogService.logInfo(`[MtpNetworker] processMessage() Server even message id ${messageID}`)
         return
     }
     switch (message._) {
@@ -859,10 +907,10 @@ MtpNetworker.prototype.processMessage = function (message, messageID, sessionID)
             break
 
         case 'bad_server_salt':
-            LogService.logInfo(`[MtpNetworker] processMessage() Bad server salt ${JSON.stringify(message, 0, 2)}`)
+            //LogService.logInfo(`[MtpNetworker] processMessage() Bad server salt ${JSON.stringify(message, 0, 2)}`)
             var sentMessage = this.sentMessages[message.bad_msg_id]
             if (!sentMessage || sentMessage.seq_no != message.bad_msg_seqno) {
-                LogService.logInfo(`[MtpNetworker] processMessage() Bad server salt for invalid message ${JSON.stringify(message, 0, 2)}`)
+                //LogService.logInfo(`[MtpNetworker] processMessage() Bad server salt for invalid message ${JSON.stringify(message, 0, 2)}`)
                 throw new Error('[MT] Bad server salt for invalid message')
             }
 
@@ -872,17 +920,17 @@ MtpNetworker.prototype.processMessage = function (message, messageID, sessionID)
             break
 
         case 'bad_msg_notification':
-            LogService.logInfo(`[MtpNetworker] processMessage() Bad msg notification ${JSON.stringify(message, 0, 2)}`)
+            //LogService.logInfo(`[MtpNetworker] processMessage() Bad msg notification ${JSON.stringify(message, 0, 2)}`)
             var sentMessage = this.sentMessages[message.bad_msg_id]
             if (!sentMessage || sentMessage.seq_no != message.bad_msg_seqno) {
                 throw new Error('[MT] Bad msg notification for invalid message')
             }
 
-            if (message.error_code == 16 || message.error_code == 17) {
+            if (message.error_code == 16 || message.error_code == 17 || message.error_code == 32 || message.error_code == 33) {
                 if (MtpTimeManager.applyServerTime(
                     bigStringInt(messageID).shiftRight(32).toString(10)
                 )) {
-                    LogService.logInfo(`[MtpNetworker] processMessage() Update session`)
+                    //LogService.logInfo(`[MtpNetworker] processMessage() Update session`)
                     this.updateSessionId()
                 }
                 var badMessage = this.updateSentMessage(message.bad_msg_id)
@@ -904,10 +952,24 @@ MtpNetworker.prototype.processMessage = function (message, messageID, sessionID)
             break
 
         case 'new_session_created':
+
+            console.info('new session created');
+            // this.updateSentMessage(message.first_msg_id)
             this.ackMessage(messageID)
+            // this.updateSentMessage(message.first_msg_id)
 
             this.processMessageAck(message.first_msg_id)
             this.applyServerSalt(message.server_salt)
+
+            // this.seqNo = 0;
+            // this.prevSessionID = this.sessionID;
+            // this.sessionID = sessionID;
+            if (MtpTimeManager.applyServerTime(
+                bigStringInt(messageID).shiftRight(32).toString(10)
+            )) {
+                    //LogService.logInfo(`[MtpNetworker] processMessage() Update session`)
+                this.updateSessionId()
+            }
 
             var self = this
 
@@ -962,13 +1024,13 @@ MtpNetworker.prototype.processMessage = function (message, messageID, sessionID)
                 var deferred = sentMessage.deferred
                 if (message.result._ == 'rpc_error') {
                     var error = this.processError(message.result)
-                    LogService.logError(`[MtpNetworker] processMessageAck() Rpc error ${new ErrorResponse(error)}`)
+                    //LogService.logError(`[MtpNetworker] processMessageAck() Rpc error ${new ErrorResponse(error)}`)
                     if (deferred) {
                         deferred.reject(error)
                     }
                 } else {
                     if (deferred) {
-                        LogService.logVerbose(`[MtpNetworker] processMessageAck() Rpc response ${JSON.stringify(message.result, 0, 2)}`)
+                        //LogService.logVerbose(`[MtpNetworker] processMessageAck() Rpc response ${JSON.stringify(message.result, 0, 2)}`)
                         sentMessage.deferred.resolve(message.result)
                     }
                     if (sentMessage.isAPI) {
