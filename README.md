@@ -1,6 +1,6 @@
 # TeleWeb - Telegram API implementation for JS in the browser
 
-Based on original [TeleJS library](https://github.com/RD17/TeleJS) with few changes:
+Based on original [TeleJS library(thanks RD17)](https://github.com/RD17/TeleJS) with few changes:
 
  - Switched to [websockets](https://core.telegram.org/mtproto/transports#websocket)
  - Switched to TG API layer 112
@@ -76,3 +76,7 @@ telegram.setUpdatesCallback((updateObject)=>{
     console.log(updateObject);
   });
 ```
+
+## License
+
+MIT
