@@ -16,7 +16,7 @@ Based on original [TeleJS library(thanks RD17)](https://github.com/RD17/TeleJS) 
 
 ## Code Usage
 
-```
+```javascript
 const telegram = require('teleweb');
 
 const config = {
