@@ -114,6 +114,10 @@ let networkersPromises = {};
 let networkersPromisesResolvers = {};
 let networkersPromisesRejecters = {};
 
+export const activeNetworkers = ()=>{
+    return Object.keys(networkers);
+}
+
 export const logOut = () => {
     isInitialized = false;
     networkers = {};
